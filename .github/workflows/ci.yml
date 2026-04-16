@@ -1,0 +1,114 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  lint-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run lint --if-present
+      - run: npx tsc --noEmit
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      # Set PLAYWRIGHT_BASE_URL to your staging or production URL
+      # Configure this secret in GitHub Settings → Secrets → Actions
+      PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install chromium --with-deps
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: e2e-results/
+          retention-days: 7
+
+  label-issues:
+    name: Update GitHub Issue Labels
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Label issues on E2E pass
+        if: needs.e2e.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            const issueNumbers = [...prBody.matchAll(/closes?\s+#(\d+)/gi)].map(m => parseInt(m[1]));
+            for (const issue of issueNumbers) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue,
+                labels: ['ready-for-review']
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue,
+                body: '✅ E2E tests passed. This issue is ready for review.'
+              });
+            }
+      - name: Label issues on E2E fail
+        if: needs.e2e.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            const issueNumbers = [...prBody.matchAll(/closes?\s+#(\d+)/gi)].map(m => parseInt(m[1]));
+            for (const issue of issueNumbers) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue,
+                labels: ['e2e-failed']
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue,
+                body: '❌ E2E tests failed. Review test results before merging.'
+              });
+            }
