@@ -114,10 +114,11 @@ jobs:
       # ─────────────────────────────────────────────────────
       # Step 6: Send email notification to stakeholders
       # Recipient: validationlabs@bcbsfl.com
+      # Provider: Resend (same as VentureWell OTP emails)
       # ─────────────────────────────────────────────────────
       - name: Send release notification email
         env:
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           RELEASE_SHA: ${{ env.RELEASE_SHA }}
           APP_NAME: ${{ vars.APP_NAME }}

@@ -15,15 +15,17 @@
     import { getFirestore, collection, query, orderBy, limit, getDocs, where }
       from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-    // ── Firebase config (replace with your project values in portal-config.js) ──
-    const firebaseConfig = window.PORTAL_FIREBASE_CONFIG || {
-      apiKey:            "REPLACE_ME",
-      authDomain:        "REPLACE_ME.firebaseapp.com",
-      projectId:         "REPLACE_ME",
-      storageBucket:     "REPLACE_ME.appspot.com",
-      messagingSenderId: "REPLACE_ME",
-      appId:             "REPLACE_ME",
+    // ── Firebase config — innovation-playground-425319 (ValidationLabs shared project) ──
+    const firebaseConfig = {
+      apiKey:            "AIzaSyAP6Oa9wJMgUXzU3_MoRgU_RBRh75CEtaw",
+      authDomain:        "innovation-playground-425319.firebaseapp.com",
+      projectId:         "innovation-playground-425319",
+      storageBucket:     "innovation-playground-425319.appspot.com",
+      messagingSenderId: "964262920962",
+      appId:             "1:964262920962:web:9525e275ea98358823781b",
+      measurementId:     "G-Y9YM2K446J",
     };
+
 
     const app  = initializeApp(firebaseConfig);
     const auth = getAuth(app);
