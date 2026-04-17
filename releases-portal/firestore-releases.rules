@@ -1,0 +1,29 @@
+// Firestore Security Rules
+// ValidationLabs Release Intelligence — releases collection
+//
+// Authentication model:
+//   - Releases can be READ by any authenticated Firebase user
+//     (users sign in via the Release Portal with lab credentials)
+//   - Releases can only be WRITTEN by the CI service account 
+//     (no direct client writes)
+//   - The CI pipeline uses the Firebase Admin SDK (bypasses these rules)
+//
+// Copy/merge these rules into your project's firestore.rules file.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ── Release Intelligence collection ──────────────────────────────
+    match /releases/{releaseId} {
+      // Any authenticated user (lab login) can read release records
+      allow read: if request.auth != null;
+      
+      // No direct writes from clients — CI only (via Admin SDK)
+      allow write: if false;
+    }
+    
+    // ── Existing project rules go below ──────────────────────────────
+    // (keep your existing workspace/user rules here)
+  }
+}

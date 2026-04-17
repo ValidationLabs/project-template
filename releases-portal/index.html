@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ValidationLabs — Release Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+    import { getFirestore, collection, query, orderBy, limit, getDocs, where }
+      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+    // ── Firebase config (replace with your project values in portal-config.js) ──
+    const firebaseConfig = window.PORTAL_FIREBASE_CONFIG || {
+      apiKey:            "REPLACE_ME",
+      authDomain:        "REPLACE_ME.firebaseapp.com",
+      projectId:         "REPLACE_ME",
+      storageBucket:     "REPLACE_ME.appspot.com",
+      messagingSenderId: "REPLACE_ME",
+      appId:             "REPLACE_ME",
+    };
+
+    const app  = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
+
+    // ────────────────────────────────────────────────────────
+    // Auth state
+    // ────────────────────────────────────────────────────────
+    onAuthStateChanged(auth, user => {
+      if (user) {
+        document.getElementById('auth-screen').style.display = 'none';
+        document.getElementById('portal-screen').style.display = 'block';
+        document.getElementById('user-email').textContent = user.email;
+        loadReleases();
+      } else {
+        document.getElementById('auth-screen').style.display = 'flex';
+        document.getElementById('portal-screen').style.display = 'none';
+      }
+    });
+
+    // Sign in
+    window.handleSignIn = async () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const errEl = document.getElementById('auth-error');
+      errEl.textContent = '';
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (e) {
+        errEl.textContent = e.code === 'auth/invalid-credential'
+          ? 'Incorrect email or password.'
+          : 'Sign-in failed. Contact your lab administrator.';
+      }
+    };
+
+    // Sign out
+    window.handleSignOut = () => signOut(auth);
+
+    // ────────────────────────────────────────────────────────
+    // Release loading
+    // ────────────────────────────────────────────────────────
+    let allReleases = [];
+    let activeFilter = 'all';
+
+    async function loadReleases() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('releases-grid').innerHTML = '';
+
+      try {
+        const q = query(
+          collection(db, 'releases'),
+          orderBy('date', 'desc'),
+          limit(50)
+        );
+        const snapshot = await getDocs(q);
+        allReleases = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderReleases();
+        buildAppFilters();
+      } catch (e) {
+        console.error(e);
+        document.getElementById('releases-grid').innerHTML =
+          '<p class="empty-state">Unable to load releases. Check your connection.</p>';
+      } finally {
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    function buildAppFilters() {
+      const apps = [...new Set(allReleases.map(r => r.app).filter(Boolean))];
+      const container = document.getElementById('app-filters');
+      container.innerHTML = `
+        <button class="filter-btn active" onclick="setFilter('all')">All Apps</button>
+        ${apps.map(a => `<button class="filter-btn" onclick="setFilter('${a}')">${a}</button>`).join('')}
+      `;
+    }
+
+    window.setFilter = (filter) => {
+      activeFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => {
+        b.classList.toggle('active', b.textContent === (filter === 'all' ? 'All Apps' : filter));
+      });
+      renderReleases();
+    };
+
+    function renderReleases() {
+      const filtered = activeFilter === 'all'
+        ? allReleases
+        : allReleases.filter(r => r.app === activeFilter);
+
+      const grid = document.getElementById('releases-grid');
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '<p class="empty-state">No releases found.</p>';
+        return;
+      }
+
+      grid.innerHTML = filtered.map(release => {
+        const date = release.date?.toDate
+          ? release.date.toDate().toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })
+          : 'Unknown date';
+
+        const impactConfig = {
+          major: { color: '#7C3AED', bg: '#F5F3FF', label: '🚀 Major' },
+          minor: { color: '#2563EB', bg: '#EFF6FF', label: '✨ Minor' },
+          patch: { color: '#059669', bg: '#ECFDF5', label: '🔧 Patch' },
+        };
+        const impact = impactConfig[release.impactLevel] || impactConfig.patch;
+
+        const firstScreenshot = release.screenshotUrls?.[0]?.url;
+        const summaryItems = [
+          ...(release.summary?.whatsNew || []),
+          ...(release.summary?.whatsFixed || []),
+          ...(release.summary?.whatsChanged || []),
+        ].slice(0, 3);
+
+        return `
+          <div class="release-card" onclick="window.open('${release.releaseCardUrl}', '_blank')">
+            ${firstScreenshot ? `
+              <div class="card-screenshot">
+                <img src="${firstScreenshot}" alt="${release.headline}" loading="lazy" />
+              </div>` : `
+              <div class="card-screenshot card-screenshot--empty">
+                <span>📦</span>
+              </div>`
+            }
+            <div class="card-body">
+              <div class="card-meta">
+                <span class="app-tag">${release.app || 'Unknown'}</span>
+                <span class="impact-chip" style="background:${impact.bg};color:${impact.color}">${impact.label}</span>
+              </div>
+              <p class="card-date">${date} · <code class="sha">${release.sha?.slice(0,7) || ''}</code></p>
+              <h3 class="card-headline">${release.headline || 'Release update'}</h3>
+              ${summaryItems.length > 0 ? `
+                <ul class="card-bullets">
+                  ${summaryItems.map(item => `<li>${item}</li>`).join('')}
+                </ul>` : ''
+              }
+              <div class="card-footer">
+                <span class="card-link">View Release Brief →</span>
+                ${release.screenshotUrls?.length > 1
+                  ? `<span class="screenshot-count">📸 ${release.screenshotUrls.length} screens</span>`
+                  : ''}
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+  </script>
+
+  <style>
+    :root {
+      --bg: #0F172A;
+      --surface: #1E293B;
+      --surface-2: #334155;
+      --border: #334155;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --accent: #6366F1;
+      --accent-hover: #818CF8;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Auth Screen ── */
+    #auth-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      background: radial-gradient(ellipse at center, #1E293B 0%, #0F172A 70%);
+    }
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .auth-logo {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .auth-title { font-size: 24px; font-weight: 800; margin-bottom: 6px; }
+    .auth-sub { font-size: 14px; color: var(--text-muted); margin-bottom: 32px; }
+    .auth-field { margin-bottom: 16px; }
+    .auth-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .auth-field input {
+      width: 100%; padding: 12px 14px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text);
+      font-size: 14px; font-family: inherit;
+      outline: none; transition: border-color 0.2s;
+    }
+    .auth-field input:focus { border-color: var(--accent); }
+    .auth-btn {
+      width: 100%; padding: 13px;
+      background: var(--accent); color: white;
+      border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 700; font-family: inherit;
+      cursor: pointer; margin-top: 8px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .auth-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .auth-error { color: #F87171; font-size: 13px; margin-top: 12px; min-height: 20px; }
+
+    /* ── Portal Screen ── */
+    #portal-screen { display: none; }
+    .portal-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,23,42,0.8);
+      backdrop-filter: blur(12px);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .nav-brand { font-size: 14px; font-weight: 800; letter-spacing: -0.01em; }
+    .nav-brand span { color: var(--accent); }
+    .nav-right { display: flex; align-items: center; gap: 16px; }
+    .nav-user { font-size: 13px; color: var(--text-muted); }
+    .nav-signout {
+      font-size: 13px; font-weight: 600;
+      color: var(--text-muted); background: none;
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 12px; cursor: pointer; font-family: inherit;
+      transition: all 0.2s;
+    }
+    .nav-signout:hover { color: var(--text); border-color: var(--text-muted); }
+
+    .portal-header {
+      padding: 48px 32px 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .portal-eyebrow {
+      font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 8px;
+    }
+    .portal-title { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px; }
+    .portal-sub { font-size: 15px; color: var(--text-muted); }
+
+    .filter-bar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .filter-btn {
+      padding: 7px 16px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .filter-btn:hover { border-color: var(--accent); color: var(--text); }
+    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    .portal-content { padding: 32px; }
+    .releases-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 20px;
+    }
+    .release-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    }
+    .release-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+      border-color: var(--accent);
+    }
+    .card-screenshot {
+      height: 180px;
+      overflow: hidden;
+      background: var(--surface-2);
+      position: relative;
+    }
+    .card-screenshot img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .card-screenshot--empty {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+    }
+    .card-body { padding: 16px 20px 20px; }
+    .card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .app-tag {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--text-muted);
+      background: var(--surface-2);
+      padding: 3px 8px; border-radius: 6px;
+    }
+    .impact-chip {
+      font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 100px;
+    }
+    .card-date { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+    .sha { font-family: 'Courier New', monospace; font-size: 11px; }
+    .card-headline { font-size: 15px; font-weight: 700; line-height: 1.4; margin-bottom: 12px; }
+    .card-bullets { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .card-bullets li {
+      font-size: 12px; line-height: 1.4; color: var(--text-muted);
+      padding-left: 12px; position: relative;
+    }
+    .card-bullets li::before {
+      content: '·'; position: absolute; left: 0; color: var(--accent);
+    }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 14px; padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .card-link { font-size: 13px; font-weight: 600; color: var(--accent); }
+    .screenshot-count { font-size: 12px; color: var(--text-muted); }
+    .empty-state { color: var(--text-muted); font-size: 14px; grid-column: 1/-1; text-align: center; padding: 60px; }
+
+    #loading {
+      display: none;
+      align-items: center; justify-content: center;
+      padding: 80px; color: var(--text-muted);
+      font-size: 14px; grid-column: 1/-1;
+    }
+    .spinner {
+      width: 20px; height: 20px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin-right: 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 640px) {
+      .portal-nav, .portal-header, .filter-bar, .portal-content { padding-left: 20px; padding-right: 20px; }
+      .portal-title { font-size: 24px; }
+      .releases-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Auth Screen ── -->
+  <div id="auth-screen">
+    <div class="auth-card">
+      <p class="auth-logo">ValidationLabs</p>
+      <h1 class="auth-title">Release Portal</h1>
+      <p class="auth-sub">Sign in with your lab credentials to view release history across all ValidationLabs applications.</p>
+
+      <div class="auth-field">
+        <label>Email</label>
+        <input type="email" id="email" placeholder="you@bcbsfl.com"
+          onkeydown="if(event.key==='Enter') handleSignIn()" />
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" id="password" placeholder="••••••••"
+          onkeydown="if(event.key==='Enter') handleSignIn()" />
+      </div>
+      <button class="auth-btn" onclick="handleSignIn()">Sign In to Release Portal</button>
+      <p class="auth-error" id="auth-error"></p>
+    </div>
+  </div>
+
+  <!-- ── Portal Screen ── -->
+  <div id="portal-screen">
+    <nav class="portal-nav">
+      <span class="nav-brand">Validation<span>Labs</span> · Releases</span>
+      <div class="nav-right">
+        <span class="nav-user" id="user-email"></span>
+        <button class="nav-signout" onclick="handleSignOut()">Sign Out</button>
+      </div>
+    </nav>
+
+    <div class="portal-header">
+      <p class="portal-eyebrow">Innovation Engineering</p>
+      <h1 class="portal-title">Release History</h1>
+      <p class="portal-sub">Every deployment across all ValidationLabs applications — with AI-authored summaries and screenshots.</p>
+    </div>
+
+    <div class="filter-bar" id="app-filters">
+      <button class="filter-btn active" onclick="setFilter('all')">All Apps</button>
+    </div>
+
+    <div class="portal-content">
+      <div class="releases-grid" id="releases-grid">
+        <div id="loading" style="display:flex">
+          <div class="spinner"></div> Loading releases...
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
