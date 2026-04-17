@@ -15,15 +15,18 @@
     import { getFirestore, collection, query, orderBy, limit, getDocs, where }
       from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-    // ── Firebase config — innovation-playground-425319 (ValidationLabs shared project) ──
+    // ── Firebase config ──────────────────────────────────────────────────────
+    // Values are injected at deploy time by release-intelligence.yml
+    // from GitHub Repository Variables (Settings → Variables → Actions).
+    // See: .github/workflows/release-intelligence.yml Step 7
+    // ─────────────────────────────────────────────────────────────────────────
     const firebaseConfig = {
-      apiKey:            "AIzaSyAP6Oa9wJMgUXzU3_MoRgU_RBRh75CEtaw",
-      authDomain:        "innovation-playground-425319.firebaseapp.com",
-      projectId:         "innovation-playground-425319",
-      storageBucket:     "innovation-playground-425319.appspot.com",
-      messagingSenderId: "964262920962",
-      appId:             "1:964262920962:web:9525e275ea98358823781b",
-      measurementId:     "G-Y9YM2K446J",
+      apiKey:            "%%FIREBASE_API_KEY%%",
+      authDomain:        "%%FIREBASE_AUTH_DOMAIN%%",
+      projectId:         "%%FIREBASE_PROJECT_ID%%",
+      storageBucket:     "%%FIREBASE_STORAGE_BUCKET%%",
+      messagingSenderId: "%%FIREBASE_MESSAGING_SENDER_ID%%",
+      appId:             "%%FIREBASE_APP_ID%%",
     };
 
 
