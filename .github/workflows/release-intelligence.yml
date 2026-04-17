@@ -1,0 +1,134 @@
+name: Release Intelligence
+
+# Runs AFTER deploy.yml succeeds on every push to main.
+# Captures screenshots, generates AI release summary, assembles
+# a branded HTML release brief, and publishes to Firebase Storage + Firestore.
+
+on:
+  workflow_run:
+    workflows: ["Deploy to Cloud Run"]
+    types: [completed]
+    branches: [main]
+
+  # Also allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to generate release for (defaults to HEAD)'
+        required: false
+
+env:
+  NODE_VERSION: '20'
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  release-intelligence:
+    name: Generate Release Intelligence
+    runs-on: ubuntu-latest
+    # Only run if the deploy workflow succeeded (or if manually triggered)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      id-token: write  # For WIF GCP auth
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 20  # Enough history for git log/diff
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      # ─────────────────────────────────────────────────────
+      # Step 1: Capture screenshots of all UI routes
+      # ─────────────────────────────────────────────────────
+      - name: Capture release screenshots
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+          RELEASE_TEST_EMAIL: ${{ secrets.RELEASE_TEST_EMAIL }}
+          RELEASE_TEST_PASSWORD: ${{ secrets.RELEASE_TEST_PASSWORD }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+        run: node scripts/capture-release-screenshots.js
+
+      # ─────────────────────────────────────────────────────
+      # Step 2: Generate AI release summary via Gemini
+      # ─────────────────────────────────────────────────────
+      - name: Generate AI release summary
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          APP_NAME: ${{ vars.APP_NAME }}
+        run: node scripts/generate-release-summary.js
+
+      # ─────────────────────────────────────────────────────
+      # Step 3: Assemble the HTML release card
+      # ─────────────────────────────────────────────────────
+      - name: Assemble release card
+        env:
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          APP_NAME: ${{ vars.APP_NAME }}
+        run: node scripts/assemble-release-card.js
+
+      # ─────────────────────────────────────────────────────
+      # Step 4: Upload artifacts to Firebase Storage
+      # ─────────────────────────────────────────────────────
+      - name: Upload to Firebase Storage
+        env:
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+        run: |
+          gsutil -m cp -r release-artifacts/${{ env.RELEASE_SHA }}/ \
+            gs://${{ secrets.FIREBASE_STORAGE_BUCKET }}/releases/${{ env.RELEASE_SHA }}/
+
+      # ─────────────────────────────────────────────────────
+      # Step 5: Write Firestore release record
+      # ─────────────────────────────────────────────────────
+      - name: Record release in Firestore
+        env:
+          FIRESTORE_PROJECT_ID: ${{ secrets.FIRESTORE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          APP_NAME: ${{ vars.APP_NAME }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: node scripts/record-release.js
+
+      # ─────────────────────────────────────────────────────
+      # Step 6: Post release card URL as workflow summary
+      # ─────────────────────────────────────────────────────
+      - name: Post release summary
+        if: always()
+        run: |
+          CARD_URL="https://storage.googleapis.com/${{ secrets.FIREBASE_STORAGE_BUCKET }}/releases/${{ env.RELEASE_SHA }}/release-card.html"
+          echo "## Release Intelligence Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: \`${{ env.RELEASE_SHA }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Release Card]($CARD_URL)" >> $GITHUB_STEP_SUMMARY
+
+      # Backup: also upload to GitHub Actions artifacts (30-day retention)
+      - name: Upload artifacts backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-intelligence-${{ env.RELEASE_SHA }}
+          path: release-artifacts/
+          retention-days: 30

@@ -1,0 +1,11 @@
+{
+  "app": "YOUR_APP_NAME",
+  "_comment": "Configure routes to screenshot after each deployment. Used by the Release Intelligence pipeline.",
+  "baseUrl": "${PLAYWRIGHT_BASE_URL}",
+  "routes": [
+    { "path": "/",      "label": "Landing Page",  "fullPage": true,  "authRequired": false },
+    { "path": "/#/dashboard", "label": "Dashboard", "fullPage": true, "authRequired": true  }
+  ],
+  "captureVideo": [],
+  "authRequired": ["/#/dashboard"]
+}
