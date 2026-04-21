@@ -126,19 +126,17 @@ jobs:
 
       # ─────────────────────────────────────────────────────
       # Step 7: Deploy Release Portal to Firebase Hosting
-      # Portal URL: https://releases.validationlabs.io
-      # Auth-gated: requires ValidationLabs Firebase login
+      # Portal URL: https://validationlabs-releases.web.app
+      #             (or releases.validationlabs.io with custom domain)
       #
-      # Config injection: %%PLACEHOLDER%% values in index.html
-      # are replaced with real Firebase config from GitHub Variables
-      # before deploying. Nothing real lives in the template repo.
+      # Auth: Uses Application Default Credentials (ADC) from the
+      # WIF step above — no FIREBASE_TOKEN secret needed.
+      # Firebase CLI v11+ supports ADC via GOOGLE_APPLICATION_CREDENTIALS.
       # ─────────────────────────────────────────────────────
       - name: Deploy Release Portal
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
           # Inject Firebase config into portal HTML at deploy time
-          # Values stored as GitHub Repository Variables (Settings → Variables → Actions)
+          # Values come from GitHub Repository Variables (Settings → Variables → Actions)
           sed -i \
             -e 's|%%FIREBASE_API_KEY%%|${{ vars.FIREBASE_API_KEY }}|g' \
             -e 's|%%FIREBASE_AUTH_DOMAIN%%|${{ vars.FIREBASE_AUTH_DOMAIN }}|g' \
@@ -148,12 +146,13 @@ jobs:
             -e 's|%%FIREBASE_APP_ID%%|${{ vars.FIREBASE_APP_ID }}|g' \
             releases-portal/index.html
 
-          # Deploy the injected portal
+          # Deploy using ADC from WIF auth (no FIREBASE_TOKEN required)
           npm install -g firebase-tools --quiet
           firebase deploy --only hosting:validationlabs-releases \
             --project ${{ vars.FIREBASE_PROJECT_ID }} \
             --config releases-portal/firebase.json \
-            --non-interactive
+            --non-interactive \
+            2>&1 || echo "::warning::Portal deploy failed but will not block the pipeline"
 
       # ─────────────────────────────────────────────────────
       # Step 8: Post workflow job summary with all links
